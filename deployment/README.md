@@ -32,4 +32,6 @@ Administrator credentials are stored only on the production server in `/opt/isty
 
 The original upstream workflows are archived in `.github/upstream-workflows/`; they are not executed by GitHub. They include Twenty-owned infrastructure dispatches, website previews, translations, release automation and extensive unrelated package checks. The fork keeps all upstream source and tests. Production images use the upstream production Docker target, which excludes development source and compiled server integration tests.
 
+The build appends a production stage that also removes compiled unit test files (`*.spec.js`, `*.test.js` and their source maps) from server output; this leaves upstream test source available for development while keeping it out of the deployed fork image.
+
 Active workflows are deployment configuration checks, manual production build/deploy, manual production migrations and the manual runner availability check. External pull requests do not execute on the persistent organization runners; internal pull requests run deployment checks.

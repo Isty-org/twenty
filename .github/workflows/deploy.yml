@@ -57,13 +57,26 @@ jobs:
       - name: Resolve source commit
         id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Prepare production Dockerfile without compiled tests
+        run: |
+          directory="$RUNNER_TEMP/twenty-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -m 700 -p "$directory"
+          cp packages/twenty-docker/twenty/Dockerfile "$directory/Dockerfile"
+          cat >> "$directory/Dockerfile" <<'DOCKERFILE'
+
+          FROM twenty AS isty-twenty
+          USER root
+          RUN find /app/packages/twenty-server/dist -type f \( -name '*.spec.js' -o -name '*.spec.js.map' -o -name '*.test.js' -o -name '*.test.js.map' \) -delete
+          USER 1000
+          DOCKERFILE
+          echo "DOCKERFILE_PATH=$directory/Dockerfile" >> "$GITHUB_ENV"
       - name: Build production image
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: packages/twenty-docker/twenty/Dockerfile
-          target: twenty
+          file: ${{ env.DOCKERFILE_PATH }}
+          target: isty-twenty
           platforms: linux/amd64
           push: true
           tags: ghcr.io/isty-org/twenty:sha-${{ steps.source.outputs.sha }}
@@ -75,7 +88,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=isty-twenty-amd64
       - name: Remove temporary credentials
         if: always()
-        run: rm -rf -- "$DOCKER_CONFIG"
+        run: |
+          rm -rf -- "$DOCKER_CONFIG"
+          rm -rf -- "$RUNNER_TEMP/twenty-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   deploy:
     needs: build
@@ -115,7 +130,9 @@ jobs:
             ssh -i "$SSH_DIRECTORY/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile="$SSH_DIRECTORY/known_hosts" "root@$DEPLOY_HOST" "deploy $DEPLOY_IMAGE"
       - name: Check public HTTPS endpoint
-        run: curl --fail --silent --show-error --retry 6 --retry-delay 10 https://twenty.isty.ist/healthz
+        run: |
+          curl --fail --silent --show-error --retry 6 --retry-delay 10 https://twenty.isty.ist/healthz
+          curl --fail --silent --show-error --retry 6 --retry-delay 10 -H 'Accept: text/html' https://twenty.isty.ist/ | grep -q '</head>'
       - name: Remove temporary SSH credentials
         if: always()
         run: rm -rf -- "$SSH_DIRECTORY"
