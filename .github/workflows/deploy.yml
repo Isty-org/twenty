@@ -56,16 +56,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve source commit
         id: source
-        env:
-          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           sha=$(git rev-parse HEAD)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          if [[ "$SOURCE_REF" =~ ^twenty/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-            echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=git-${sha:0:12}" >> "$GITHUB_OUTPUT"
-          fi
+          version=$(sed -n "s/^export const TWENTY_CURRENT_VERSION = '\([^']*\)'.*/\1/p" packages/twenty-server/src/engine/core-modules/upgrade/constants/twenty-current-version.constant.ts)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=v$version" >> "$GITHUB_OUTPUT"
       - name: Prepare production Dockerfile without compiled tests
         run: |
           directory="$RUNNER_TEMP/twenty-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
