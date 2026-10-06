@@ -1,0 +1,16 @@
+name: Runner availability check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: [self-hosted, linux, x64, isty-ci]
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "Runner: $RUNNER_NAME"
+          free -h
+          df -h "$RUNNER_TEMP"
+          docker version --format '{{.Server.Version}}'
+          docker compose version
