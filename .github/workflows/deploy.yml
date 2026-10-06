@@ -1,0 +1,119 @@
+name: Manual production deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Source branch, tag or commit to build (stable release by default)"
+        required: true
+        default: twenty/v2.45.0
+        type: string
+      build_image:
+        description: "Build the fork source and publish to GHCR; otherwise use pinned official v2.45.0"
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: twenty-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: inputs.build_image
+    runs-on: [self-hosted, linux, x64, isty-ci]
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ghcr.io/isty-org/twenty@${{ steps.build.outputs.digest }}
+    env:
+      DOCKER_CONFIG: ${{ runner.temp }}/twenty-docker-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+          persist-credentials: false
+      - name: Prepare isolated credentials
+        run: mkdir -m 700 -p "$DOCKER_CONFIG"
+      - uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 1
+          driver-opts: |
+            memory=6g
+            env.BUILDKIT_STEP_LOG_MAX_SIZE=10485760
+            env.BUILDKIT_STEP_LOG_MAX_SPEED=1048576
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve source commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Build production image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/twenty-docker/twenty/Dockerfile
+          target: twenty
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/isty-org/twenty:sha-${{ steps.source.outputs.sha }}
+          build-args: APP_VERSION=${{ inputs.source_ref }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/Isty-org/twenty
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+          cache-from: type=gha,scope=isty-twenty-amd64
+          cache-to: type=gha,mode=max,scope=isty-twenty-amd64
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -rf -- "$DOCKER_CONFIG"
+
+  deploy:
+    needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: [self-hosted, linux, x64, isty-ci]
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DEPLOY_IMAGE: ${{ needs.build.outputs.image || 'twentycrm/twenty:v2.45.0' }}
+      SSH_DIRECTORY: ${{ runner.temp }}/twenty-ssh-${{ github.run_id }}-${{ github.run_attempt }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare SSH credentials
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          mkdir -p "$SSH_DIRECTORY"
+          printf '%s\n' "$SSH_KEY" > "$SSH_DIRECTORY/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$SSH_DIRECTORY/known_hosts"
+      - name: Deploy Twenty with backup and health checks
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/isty-org/twenty@sha256:[a-f0-9]{64}$ || "$DEPLOY_IMAGE" == twentycrm/twenty:v2.45.0 ]]
+          tar -czf "$SSH_DIRECTORY/payload.tar.gz" -C deployment compose.yaml ensure_boards.py
+          { printf '%s\n' "$REGISTRY_TOKEN"; cat "$SSH_DIRECTORY/payload.tar.gz"; } |
+            ssh -i "$SSH_DIRECTORY/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$SSH_DIRECTORY/known_hosts" "root@$DEPLOY_HOST" "deploy $DEPLOY_IMAGE"
+      - name: Check public HTTPS endpoint
+        run: curl --fail --silent --show-error --retry 6 --retry-delay 10 https://twenty.isty.ist/healthz
+      - name: Remove temporary SSH credentials
+        if: always()
+        run: rm -rf -- "$SSH_DIRECTORY"

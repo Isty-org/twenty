@@ -1,0 +1,58 @@
+name: Manual production migrations
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Currently deployed image (official version or GHCR digest)"
+        required: true
+        default: twentycrm/twenty:v2.45.0
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: twenty-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, x64, isty-ci]
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DEPLOY_IMAGE: ${{ inputs.image }}
+      SSH_DIRECTORY: ${{ runner.temp }}/twenty-ssh-${{ github.run_id }}-${{ github.run_attempt }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare SSH credentials
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          mkdir -p "$SSH_DIRECTORY"
+          printf '%s\n' "$SSH_KEY" > "$SSH_DIRECTORY/key"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$SSH_DIRECTORY/known_hosts"
+      - name: Run production migrations with backup
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_IMAGE" =~ ^ghcr\.io/isty-org/twenty@sha256:[a-f0-9]{64}$ || "$DEPLOY_IMAGE" =~ ^twentycrm/twenty:v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          tar -czf "$SSH_DIRECTORY/payload.tar.gz" -C deployment compose.yaml ensure_boards.py
+          { printf '%s\n' "$REGISTRY_TOKEN"; cat "$SSH_DIRECTORY/payload.tar.gz"; } |
+            ssh -i "$SSH_DIRECTORY/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$SSH_DIRECTORY/known_hosts" "root@$DEPLOY_HOST" "migrate $DEPLOY_IMAGE"
+      - name: Check public HTTPS endpoint
+        run: curl --fail --silent --show-error --retry 6 --retry-delay 10 https://twenty.isty.ist/healthz
+      - name: Remove temporary SSH credentials
+        if: always()
+        run: rm -rf -- "$SSH_DIRECTORY"

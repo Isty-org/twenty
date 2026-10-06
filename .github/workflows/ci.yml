@@ -1,0 +1,41 @@
+name: Deployment checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: twenty-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, isty-ci]
+    timeout-minutes: 10
+    env:
+      PYTHONPYCACHEPREFIX: ${{ runner.temp }}/twenty-python-${{ github.run_id }}
+      PG_DATABASE_PASSWORD: validation-only
+      ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      APP_SECRET: validation-only
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate production configuration
+        run: |
+          docker compose -f deployment/compose.yaml config -q
+          bash -n deployment/dispatch.sh
+          python -m py_compile deployment/ensure_boards.py
+          python deployment/check_workflows.py
+      - name: Remove temporary Python files
+        if: always()
+        run: rm -rf -- "$PYTHONPYCACHEPREFIX"
