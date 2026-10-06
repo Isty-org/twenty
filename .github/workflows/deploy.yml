@@ -56,7 +56,16 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve source commit
         id: source
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [[ "$SOURCE_REF" =~ ^twenty/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=git-${sha:0:12}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Prepare production Dockerfile without compiled tests
         run: |
           directory="$RUNNER_TEMP/twenty-build-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
@@ -80,7 +89,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ghcr.io/isty-org/twenty:sha-${{ steps.source.outputs.sha }}
-          build-args: APP_VERSION=${{ inputs.source_ref }}
+          build-args: APP_VERSION=${{ steps.source.outputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/Isty-org/twenty
             org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
