@@ -42,7 +42,7 @@ cp .env compose.yaml "$backup/"
 docker compose exec -T server tar -czf - -C /app/packages/twenty-server/.local-storage . > "$backup/storage.tar.gz"
 [[ -s "$backup/database.dump" && -s "$backup/storage.tar.gz" ]]
 if [[ "$operation" == migrate ]]; then
-  current=$(docker compose images -q server | head -1)
+  current=$(docker inspect "$(docker compose ps -q server)" --format '{{.Image}}')
   expected=$(docker image inspect "$image" --format '{{.Id}}')
   [[ "$current" == "$expected" ]] || { echo 'Migrations must use the currently deployed image'; exit 1; }
   docker compose exec -T server yarn command:prod upgrade
