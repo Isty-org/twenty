@@ -45,8 +45,8 @@ if [[ "$operation" == migrate ]]; then
   current=$(docker inspect "$(docker compose ps -q server)" --format '{{.Image}}')
   expected=$(docker image inspect "$image" --format '{{.Id}}')
   [[ "$current" == "$expected" ]] || { echo 'Migrations must use the currently deployed image'; exit 1; }
-  docker compose exec -T server yarn command:prod upgrade
-  docker compose exec -T server yarn command:prod cache:flush
+  docker compose run --rm --no-deps -T -e DISABLE_DB_MIGRATIONS=true -e DISABLE_CRON_JOBS_REGISTRATION=true server yarn command:prod upgrade
+  docker compose run --rm --no-deps -T -e DISABLE_DB_MIGRATIONS=true -e DISABLE_CRON_JOBS_REGISTRATION=true server yarn command:prod cache:flush
 else
   install -m 644 "$temporary/compose.yaml" compose.yaml
   install -m 644 "$temporary/ensure_boards.py" ensure_boards.py
