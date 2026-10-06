@@ -26,7 +26,6 @@ jobs:
       packages: read
     env:
       DEPLOY_IMAGE: ${{ inputs.image }}
-      SSH_DIRECTORY: ${{ runner.temp }}/twenty-ssh-${{ github.run_id }}-${{ github.run_attempt }}
       DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +37,8 @@ jobs:
           SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           umask 077
+          SSH_DIRECTORY="$RUNNER_TEMP/twenty-ssh-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "SSH_DIRECTORY=$SSH_DIRECTORY" >> "$GITHUB_ENV"
           mkdir -p "$SSH_DIRECTORY"
           printf '%s\n' "$SSH_KEY" > "$SSH_DIRECTORY/key"
           printf '%s\n' "$SSH_KNOWN_HOSTS" > "$SSH_DIRECTORY/known_hosts"

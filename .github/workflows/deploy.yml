@@ -30,15 +30,16 @@ jobs:
       packages: write
     outputs:
       image: ghcr.io/isty-org/twenty@${{ steps.build.outputs.digest }}
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/twenty-docker-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_ref }}
           persist-credentials: false
       - name: Prepare isolated credentials
-        run: mkdir -m 700 -p "$DOCKER_CONFIG"
+        run: |
+          directory="$RUNNER_TEMP/twenty-docker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -m 700 -p "$directory"
+          echo "DOCKER_CONFIG=$directory" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
         with:
           buildkitd-config-inline: |
@@ -87,7 +88,6 @@ jobs:
       packages: read
     env:
       DEPLOY_IMAGE: ${{ needs.build.outputs.image || 'twentycrm/twenty:v2.45.0' }}
-      SSH_DIRECTORY: ${{ runner.temp }}/twenty-ssh-${{ github.run_id }}-${{ github.run_attempt }}
       DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
     steps:
       - uses: actions/checkout@v4
@@ -99,6 +99,8 @@ jobs:
           SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           umask 077
+          SSH_DIRECTORY="$RUNNER_TEMP/twenty-ssh-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          echo "SSH_DIRECTORY=$SSH_DIRECTORY" >> "$GITHUB_ENV"
           mkdir -p "$SSH_DIRECTORY"
           printf '%s\n' "$SSH_KEY" > "$SSH_DIRECTORY/key"
           printf '%s\n' "$SSH_KNOWN_HOSTS" > "$SSH_DIRECTORY/known_hosts"

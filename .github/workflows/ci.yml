@@ -19,7 +19,6 @@ jobs:
     runs-on: [self-hosted, linux, x64, isty-ci]
     timeout-minutes: 10
     env:
-      PYTHONPYCACHEPREFIX: ${{ runner.temp }}/twenty-python-${{ github.run_id }}
       PG_DATABASE_PASSWORD: validation-only
       ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       APP_SECRET: validation-only
@@ -30,6 +29,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Prepare temporary Python cache
+        run: echo "PYTHONPYCACHEPREFIX=$RUNNER_TEMP/twenty-python-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
       - name: Validate production configuration
         run: |
           docker compose -f deployment/compose.yaml config -q
